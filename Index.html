@@ -59,6 +59,10 @@
             
             <button id="saveBtn" onclick="submitData()" class="btn btn-primary btn-lg w-100 py-3 fw-bold shadow">ADATOK RÖGZÍTÉSE</button>
         </div>
+        <div class="mt-4">
+    <h6 class="text-muted small fw-bold border-bottom pb-1">UTOLSÓ 10 RÖGZÍTÉSED:</h6>
+    <div id="historyList">Betöltés...</div>
+</div>
     </div>
 
     <script>
@@ -99,6 +103,7 @@
                     document.getElementById('mainSection').classList.remove('hidden');
                     document.getElementById('displayOpName').innerText = "Op: " + currentOperator;
                     startScanner();
+                    loadHistory();
                 } else {
                     showStatus("Hibás azonosító vagy jelszó!", "alert-danger");
                     btn.disabled = false; btn.innerText = "BELÉPÉS";
@@ -120,7 +125,34 @@
                 }
             );
         }
-
+        async function loadHistory() {
+    try {
+        const response = await fetch(SCRIPT_URL, {
+            method: 'POST',
+            body: JSON.stringify({ action: "getLastTen", operator: currentOperator })
+        });
+        const res = await response.json();
+        if(res.success && res.data) {
+            let html = '<div class="list-group">';
+            res.data.forEach(row => {
+                let d = new Date(row[2]);
+                let timeStr = d.getHours() + ":" + (d.getMinutes()<10?'0':'') + d.getMinutes();
+                html += `
+                    <div class="list-group-item list-group-item-action p-2 small">
+                        <div class="d-flex justify-content-between">
+                            <span class="fw-bold">${row[1]}</span>
+                            <span class="badge bg-secondary">${row[5]}</span>
+                        </div>
+                        <div class="text-muted" style="font-size: 0.7rem;">${timeStr} | Process: ${row[4]}</div>
+                    </div>`;
+            });
+            html += '</div>';
+            // Kell egy div a HTML-be, aminek az ID-ja 'historyList'
+            document.getElementById('historyList').innerHTML = html;
+        }
+    } catch (e) { console.log("History error", e); }
+}
+        
         function setActivity(val) {
             document.getElementById('activityValue').value = val;
             document.querySelectorAll('.action-btn').forEach(btn => btn.classList.remove('active'));
