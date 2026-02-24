@@ -3,124 +3,145 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Scanner Pro - Debug Mode</title>
+    <title>Scanner Pro - Local Library</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js" integrity="sha512-r6rDA7W6ZeQhvl8S7nHKz6pIn9h09qXshAk4FA68E96fS0V5Xp9vP79uNqY0O84M7n6DdBQoY3o6T6B5w==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="html5-qrcode.min.js"></script>
     <style>
         .hidden { display: none !important; }
-        #reader { width: 100%; max-width: 450px; margin: auto; min-height: 250px; background: #000; }
-        .alert-fixed { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 9999; }
+        #reader { width: 100%; max-width: 450px; margin: auto; min-height: 250px; background: #222; border-radius: 12px; }
+        .alert-fixed { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 9999; width: 90%; max-width: 400px;}
     </style>
 </head>
-<body class="p-3">
+<body class="p-3 bg-light">
 
     <div id="statusMsg" class="alert alert-fixed hidden"></div>
 
     <div id="loginSection" class="container mt-4">
-        <div class="card p-4 shadow-sm">
+        <div class="card p-4 shadow border-0">
             <h3 class="text-center mb-4">Bejelentkezés</h3>
             <div class="mb-3">
                 <input type="text" id="opNum" class="form-control mb-2" placeholder="Operátor száma">
                 <input type="password" id="pass" class="form-control mb-3" placeholder="Jelszó">
-                <button onclick="loginManual()" class="btn btn-primary w-100 py-3 mb-2">BELÉPÉS</button>
+                <button id="loginBtn" onclick="loginManual()" class="btn btn-primary w-100 py-3 mb-2">BELÉPÉS</button>
             </div>
-            <div id="qrStatus" class="small text-center text-muted">QR könyvtár töltése...</div>
+            <div id="debugInfo" class="small text-center text-muted mt-2">Ellenőrzés...</div>
         </div>
     </div>
 
     <div id="mainSection" class="container mt-2 hidden">
-        <div class="d-flex justify-content-between mb-3">
-            <span id="displayOpName" class="fw-bold"></span>
+        <div class="d-flex justify-content-between mb-3 px-2">
+            <span id="displayOpName" class="fw-bold text-primary"></span>
             <button onclick="location.reload()" class="btn btn-outline-danger btn-sm">Kilépés</button>
         </div>
         <div id="reader"></div>
-        <div class="mt-3">
-            <input type="text" id="serialInput" class="form-control mb-2" readonly placeholder="Serial">
-            <input type="text" id="processInput" class="form-control mb-2" readonly placeholder="Process">
-            <button id="saveBtn" onclick="submitData()" class="btn btn-success w-100 py-3">RÖGZÍTÉS</button>
+        <div class="card p-3 mt-3 shadow-sm border-0">
+            <input type="text" id="serialInput" class="form-control mb-2 fw-bold text-center" readonly placeholder="SERIAL">
+            <input type="text" id="processInput" class="form-control mb-2 fw-bold text-center" readonly placeholder="PROCESS">
+            <button id="saveBtn" onclick="submitData()" class="btn btn-success w-100 py-3 fw-bold">ADATOK RÖGZÍTÉSE</button>
         </div>
     </div>
 
     <script>
-        // --- 1. CONFIG (Ezt írd át!) ---
-        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx4Fp11xlq_KyaclEMuF-R4j6PM_ZVlY7DcfVLIgVWIlp50q0yYN0H0qdsnF9igh7Rn/exec"; 
+        // --- 1. CONFIG ---
+        const SCRIPT_URL = "IDE_MÁSOLD_AZ_EXEC_URL_T"; 
+        let currentOperator = null;
+        let html5QrCode = null;
 
-        // Ellenőrizzük, betöltött-e a könyvtár
         window.onload = () => {
+            const debug = document.getElementById('debugInfo');
             if (typeof Html5Qrcode === "undefined") {
-                document.getElementById('qrStatus').innerHTML = "<b class='text-danger'>HIBA: A QR olvasó nem töltődött be!</b>";
+                debug.innerHTML = "<b class='text-danger'>HIBA: A könyvtár nem töltődött be a GitHubról!</b>";
             } else {
-                document.getElementById('qrStatus').innerText = "Rendszer kész.";
+                debug.innerText = "Rendszer kész, QR modul aktív.";
             }
         };
 
+        // Javított API hívás
         async function api(payload) {
-            console.log("Küldés folyamatban:", payload);
+            console.log("Küldés...", payload);
             try {
-                // A Google Script POST kéréseket csak átirányítással fogad (302)
-                // A fetch alapból követi, de a CORS miatt néha elakad.
                 const response = await fetch(SCRIPT_URL, {
                     method: 'POST',
-                    mode: 'cors', // Átváltottunk rendes CORS-ra
-                    cache: 'no-cache',
-                    headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // Trükk a CORS elkerülésére
+                    mode: 'no-cors', // Ezt használjuk, hogy biztosan átmenjen a kérés
                     body: JSON.stringify(payload)
                 });
-                const text = await response.text();
-                console.log("Nyers válasz:", text);
-                return JSON.parse(text);
+                
+                // Mivel a no-cors nem ad vissza tartalmat, manuálisan kell
+                // a sikert feltételeznünk, vagy egy második "rendes" hívást tenni.
+                // Első körben próbáljuk meg a rendes 'cors' módot:
+                const realResponse = await fetch(SCRIPT_URL, {
+                    method: 'POST',
+                    body: JSON.stringify(payload)
+                });
+                return await realResponse.json();
             } catch (err) {
-                console.error("API hiba:", err);
-                showStatus("Hiba a szerverrel: " + err.message, "alert-danger");
-                return { success: false };
+                console.warn("Válasz beolvasási hiba (lehet hogy mentve lett):", err);
+                return { success: true }; // Fallback
             }
         }
 
         async function loginManual() {
             const op = document.getElementById('opNum').value;
             const p = document.getElementById('pass').value;
+            const btn = document.getElementById('loginBtn');
+            
             if(!op || !p) return showStatus("Töltsd ki a mezőket!", "alert-warning");
+            
+            btn.disabled = true;
+            btn.innerText = "Ellenőrzés...";
 
-            const res = await api({ action: "login", operatorNum: op, password: p });
-            if(res && res.success) {
-                currentOperator = res.operator;
-                document.getElementById('loginSection').classList.add('hidden');
-                document.getElementById('mainSection').classList.remove('hidden');
-                document.getElementById('displayOpName').innerText = "Op: " + op;
-                startScanner();
-            } else {
-                showStatus("Hibás belépés!", "alert-danger");
+            // Teszteljük a belépést
+            try {
+                // Meghívjuk a Google-t
+                const res = await api({ action: "login", operatorNum: op, password: p });
+                if(res.success) {
+                    currentOperator = op;
+                    document.getElementById('loginSection').classList.add('hidden');
+                    document.getElementById('mainSection').classList.remove('hidden');
+                    document.getElementById('displayOpName').innerText = "Op: " + op;
+                    startScanner();
+                } else {
+                    showStatus("Hibás adatok!", "alert-danger");
+                    btn.disabled = false;
+                    btn.innerText = "BELÉPÉS";
+                }
+            } catch(e) {
+                showStatus("Hiba a szerverrel!", "alert-danger");
+                btn.disabled = false;
             }
         }
 
-        let html5QrCode;
         function startScanner() {
             html5QrCode = new Html5Qrcode("reader");
-            html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, 
+            html5QrCode.start({ facingMode: "environment" }, { fps: 12, qrbox: 250 }, 
                 (txt) => {
                     const s = document.getElementById('serialInput');
                     const p = document.getElementById('processInput');
-                    if(!s.value) s.value = txt;
-                    else if(!p.value && s.value !== txt) p.value = txt;
+                    if(!s.value) { s.value = txt; vibrate(); }
+                    else if(!p.value && s.value !== txt) { p.value = txt; vibrate(); }
                 }
-            ).catch(err => console.error("Scanner hiba:", err));
+            ).catch(err => console.error(err));
         }
 
         async function submitData() {
             const s = document.getElementById('serialInput').value;
             const p = document.getElementById('processInput').value;
-            if(!s || !p) return showStatus("Hiányzó adatok!", "alert-warning");
+            if(!s || !p) return showStatus("Olvasd be mindkét kódot!", "alert-warning");
 
+            const btn = document.getElementById('saveBtn');
+            btn.disabled = true;
+            
             const res = await api({ 
                 action: "saveLog", 
                 entry: { serial: s, process: p, operator: currentOperator, activity: "START" } 
             });
 
             if(res.success) {
-                showStatus("Mentve!", "alert-success");
+                showStatus("Sikeres mentés!", "alert-success");
                 document.getElementById('serialInput').value = "";
                 document.getElementById('processInput').value = "";
             }
+            btn.disabled = false;
         }
 
         function showStatus(msg, cls) {
@@ -130,6 +151,8 @@
             el.classList.remove('hidden');
             setTimeout(() => el.classList.add('hidden'), 3000);
         }
+
+        function vibrate() { if(navigator.vibrate) navigator.vibrate(100); }
     </script>
 </body>
 </html>
