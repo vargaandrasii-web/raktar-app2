@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Raktár Pro - GitHub Edition</title>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        :root { --p: #2563eb; --s: #16a34a; --d: #dc2626; --bg: #f8fafc; }
+        body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg); margin: 0; padding: 15px; }
+        .card { background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        input, select { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 16px; box-sizing: border-box; }
+        .btn { width: 100%; padding: 15px; border: none; border-radius: 8px; color: white; font-weight: 700; font-size: 16px; cursor: pointer; transition: 0.2s; }
+        .btn-p { background: var(--p); }
+        .btn-s { background: var(--s); }
+        .btn-d { background: var(--d); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        #reader { width: 100%; border-radius: 12px; overflow: hidden; background: #000; }
+        .status { padding: 10px; border-radius: 8px; text-align: center; font-weight: bold; margin: 10px 0; display: none; }
+        .item-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f1f5f9; }
+    </style>
+</head>
+<body>
+
+<div id="login-screen" class="card">
+    <h2 style="text-align:center; margin-top:0">Bejelentkezés</h2>
+    <input type="text" id="user-name" placeholder="Felhasználónév">
+    <input type="password" id="user-pass" placeholder="Jelszó">
+    <button class="btn btn-p" id="login-btn" onclick="handleLogin()">BELÉPÉS</button>
+</div>
+
+<div id="main-screen" style="display:none">
+    <div class="card" style="display:flex; justify-content:space-between; align-items:center; padding: 10px 20px;">
+        <span id="logged-user" style="font-weight:bold; color:var(--p)"></span>
+        <button onclick="location.reload()" style="background:none; border:none; color:var(--d); cursor:pointer">Kijelentkezés</button>
+    </div>
+
+    <div class="card">
+        <div id="reader"></div>
+        <div id="status-box" class="status"></div>
+        <div id="product-display" style="display:none; text-align:center; margin-top:15px;">
+            <h3 id="prod-name" style="margin:5px 0"></h3>
+            <p id="prod-info" style="color:#64748b"></p>
+            <button class="btn btn-s" onclick="addToCart()">🛒 KOSÁRBA</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3 style="margin-top:0">Kosár</h3>
+        <div id="cart-items"></div>
+        <h2 style="text-align:right">Összesen: <span id="total-price">0</span> Ft</h2>
+        <button class="btn btn-s" id="save-btn" onclick="submitOrder()">RENDELÉS LEADÁSA</button>
+    </div>
+</div>
+
+<script>
+    // --- KONFIGURÁCIÓ ---
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz38ooy6W5wnWHGH6BTQkf2eOTVQ5UDp90tBqBaX1rxRdRzKAJrcFshD72gTxn6WpbmtQ/exec";
+    
+    let currentUser = "";
+    let cart = [];
+    let currentProd = null;
+    let html5QrScanner = null;
+
+    // --- KOMMUNIKÁCIÓ A GOOGLE-LEL ---
+    async function apiCall(data) {
+        try {
+            const response = await fetch(SCRIPT_URL, {
+                method: 'POST',
+                mode: 'no-cors', // Ez trükkös a Google miatt, de küldeni tudunk
+                body: JSON.stringify(data)
+            });
+            // Mivel 'no-cors' módban nem látjuk a választ, a loginhoz és kereséshez 
+            // egy speciális átirányítást vagy JSONP-t kellene használni, 
+            // DE a legegyszerűbb, ha a Google Scriptben 'Allow All' van.
+            // Ha a fetch nem ad választ, próbáljuk meg sima módban:
+            const corsResponse = await fetch(SCRIPT_URL, {
+                method: 'POST',
+                body: JSON.stringify(data)
+            });
+            return await corsResponse.json();
+        } catch (e) {
+            console.error("Hiba:", e);
+            return { success: false, found: false, msg: "Hálózati hiba" };
+        }
+    }
+
+    // --- LOGIKA ---
+    async function handleLogin() {
+        const name = document.getElementById('user-name').value;
+        const pass = document.getElementById('user-pass').value;
+        const btn = document.getElementById('login-btn');
+        
+        btn.disabled = true;
+        btn.innerText = "Ellenőrzés...";
+        
+        const res = await apiCall({ action: "login", name: name, code: pass });
+        
+        if(res.success) {
+            currentUser = res.name;
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('main-screen').style.display = 'block';
+            document.getElementById('logged-user').innerText = "👤 " + currentUser;
+            startScanner();
+        } else {
+            alert("Hiba: " + (res.msg || "Helytelen adatok"));
+            btn.disabled = false;
+            btn.innerText = "BELÉPÉS";
+        }
+    }
+
+    function startScanner() {
+        html5QrScanner = new Html5Qrcode("reader");
+        html5QrScanner.start(
+            { facingMode: "environment" },
+            { fps: 10, qrbox: 250 },
+            async (barcode) => {
+                showStatus("Keresés: " + barcode, "#e2e8f0", "#475569");
+                const res = await apiCall({ action: "getProduct", barcode: barcode });
+                
+                if(res.found) {
+                    currentProd = res;
+                    document.getElementById('product-display').style.display = 'block';
+                    document.getElementById('prod-name').innerText = res.name;
+                    document.getElementById('prod-info').innerText = res.price + " Ft / " + res.unit;
+                    showStatus("Termék megtalálva!", "#dcfce7", "#166534");
+                } else {
+                    showStatus("Nincs a listában!", "#fee2e2", "#991b1b");
+                }
+            }
+        ).catch(err => alert("Kamera hiba: " + err));
+    }
+
+    function showStatus(msg, bg, color) {
+        const b = document.getElementById('status-box');
+        b.innerText = msg;
+        b.style.background = bg;
+        b.style.color = color;
+        b.style.display = 'block';
+    }
+
+    function addToCart() {
+        if(!currentProd) return;
+        let qty = prompt("Mennyiség:", "1");
+        if(!qty || isNaN(qty)) return;
+        
+        const existing = cart.find(i => i.code === currentProd.code);
+        if(existing) existing.qty += parseInt(qty);
+        else cart.push({...currentProd, qty: parseInt(qty)});
+        
+        updateUI();
+        document.getElementById('product-display').style.display = 'none';
+    }
+
+    function updateUI() {
+        const container = document.getElementById('cart-items');
+        container.innerHTML = "";
+        let total = 0;
+        cart.forEach((item, index) => {
+            total += item.price * item.qty;
+            container.innerHTML += `
+                <div class="item-row">
+                    <span>${item.name} (${item.qty} ${item.unit})</span>
+                    <b>${(item.price * item.qty).toLocaleString()} Ft</b>
+                </div>`;
+        });
+        document.getElementById('total-price').innerText = total.toLocaleString();
+    }
+
+    async function submitOrder() {
+        if(cart.length === 0) return;
+        const btn = document.getElementById('save-btn');
+        btn.disabled = true;
+        btn.innerText = "Mentés...";
+        
+        const res = await apiCall({ action: "save", cart: cart, userName: currentUser });
+        if(res.success) {
+            alert("Sikeres mentés!");
+            cart = [];
+            updateUI();
+        } else {
+            alert("Hiba a mentés során!");
+        }
+        btn.disabled = false;
+        btn.innerText = "RENDELÉS LEADÁSA";
+    }
+</script>
+</body>
+</html>
